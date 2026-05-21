@@ -1,17 +1,21 @@
-# --- 0. AUTOMATISCHER SERVER-HOTFIX (MUSS GANZ OBEN STEHEN) ---
+# --- 0. ULTIMATIV-HOTFIX FÜR STREAMLIT CLOUD (MUSS GANZ OBEN STEHEN) ---
 import sys
 import subprocess
 
+# 1. Erzwinge das Nachinstallieren fehlender System-Bibliotheken über ein Python-Package
 try:
     import cv2
-except ImportError:
-    # Falls das normale OpenCV wegen MediaPipe-Konflikten oder fehlender 
-    # libGL.so.1 abstürzt, bereinigen wir die Umgebung vollautomatisch.
-    subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", 
-                    "opencv-python", "opencv-contrib-python", 
-                    "opencv-python-headless", "opencv-contrib-python-headless"])
-    subprocess.run([sys.executable, "-m", "pip", "install", "opencv-contrib-python-headless"])
-    import cv2
+except ImportError as e:
+    # Falls libgthread-2.0.so.0 oder libGL.so.1 fehlt, reparieren wir das direkt hier
+    subprocess.run([sys.executable, "-m", "pip", "install", "opencv-contrib-python-headless", "--force-reinstall"])
+    
+    # Falls das System immer noch meckert, nutzen wir ein Tool, das System-Bibliotheken im Python-Verzeichnis bereitstellt
+    try:
+        import cv2
+    except ImportError:
+        subprocess.run([sys.executable, "-m", "pip", "install", "apt-clone"]) # Fallback
+        # installiere ein Paket, das die libs mitliefert
+        subprocess.run([sys.executable, "-m", "pip", "install", "opencv-python-headless"])
 
 # --- AB HIER FOLGT DER NORMALE CODE ---
 import streamlit as st
@@ -32,17 +36,13 @@ mp_drawing_styles = mp.solutions.drawing_styles
 
 # --- 3. HELFER-FUNKTION: WINKELBERCHNUNG ---
 def calculate_angle(a, b, c):
-    """Berechnet den Winkel am Punkt B aus drei Punkten A, B und C."""
-    a = np.array(a)  # Start
-    b = np.array(b)  # Scheitelpunkt (Knie)
-    c = np.array(c)  # Ende
-    
+    a = np.array(a)
+    b = np.array(b)
+    c = np.array(c)
     ba = a - b
     bc = c - b
-    
     cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
     angle = np.arccos(np.clip(cosine_angle, -1.0, 1.0))
-    
     return np.degrees(angle)
 
 # --- 4. VIDEO UPLOAD & VERARBEITUNG ---
@@ -116,7 +116,6 @@ if uploaded_file is not None:
     
     st.success("Analyse abgeschlossen!")
     
-    # --- 5. KI-AUSWERTUNG & TIPPS ---
     if all_knee_angles:
         max_knee_angle = max(all_knee_angles)
         
@@ -129,13 +128,13 @@ if uploaded_file is not None:
         with col2:
             if max_knee_angle < 140:
                 st.warning("⚠️ Dein Sattel ist wahrscheinlich zu niedrig!")
-                st.write("**Tipp:** Wenn der Kniewinkel zu spitz ist, werden deine Knie an der Vorderseite stark belastet. Schiebe deinen Sattel in kleinen Schritten (ca. 5mm) nach oben.")
+                st.write("**Tipp:** Schiebe deinen Sattel in kleinen Schritten (ca. 5mm) nach oben.")
             elif max_knee_angle > 150:
                 st.warning("⚠️ Dein Sattel ist wahrscheinlich zu hoch!")
-                st.write("**Tipp:** Wenn das Bein zu stark gestreckt wird, muss dein Becken kippen. Das sorgt für Instabilität. Stelle den Sattel etwas tiefer.")
+                st.write("**Tipp:** Stelle den Sattel etwas tiefer.")
             else:
                 st.success("🎉 Perfekte Sattelhöhe!")
-                st.write("**Tipp:** Dein Kniewinkel liegt genau im ergonomischen Bereich. Deine Kraftübertragung ist optimal.")
+                st.write("**Tipp:** Dein Kniewinkel liegt genau im ergonomischen Bereich.")
                 
     os.unlink(tfile.name)
     os.unlink(out_tfile.name)
