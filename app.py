@@ -1,3 +1,21 @@
+# --- 0. ULTIMATIVER COMPATIBILITY-HOTFIX (MUSS GANZ OBEN STEHEN) ---
+import sys
+from types import ModuleType
+
+# Wir erstellen ein leeres Fake-Modul für cv2, damit MediaPipe beim Importieren 
+# nicht abstürzt, falls die echten Grafikbibliotheken auf dem Server fehlen.
+if "cv2" not in sys.modules:
+    fake_cv2 = ModuleType("cv2")
+    # Wir fügen minimale Attribute hinzu, falls MediaPipe intern danach sucht
+    fake_cv2.__dict__.update({
+        "VideoCapture": None,
+        "cvtColor": None,
+        "COLOR_BGR2RGB": 4,
+        "COLOR_RGB2BGR": 5
+    })
+    sys.modules["cv2"] = fake_cv2
+
+# --- AB HIER FOLGT DER NORMALE CODE ---
 import streamlit as st
 import mediapipe as mp
 from mediapipe.tasks import python
@@ -11,7 +29,7 @@ import urllib.request
 # --- 1. SEITEN-SETUP ---
 st.set_page_config(page_title="DIY KI Bike Fitter", layout="wide", page_icon="🚴")
 st.title("🚴 DIY AI Bike Fitting Tool")
-st.write("Lade ein seitliches Foto oder ein Video von dir hoch, um deine Haltung analysieren zu lassen.")
+st.write("Lade ein seitliches Foto deines Fahrrads hoch, um deine Haltung analysieren zu lassen.")
 
 # --- 2. MODELL AUTOMATISCH VON GOOGLE LADEN ---
 MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task"
@@ -47,7 +65,7 @@ if uploaded_file is not None:
     )
     
     with vision.PoseLandmarker.create_from_options(options) as landmarker:
-        # Konvertiere in das MediaPipe eigene Bildformat (ohne OpenCV!)
+        # Konvertiere in das MediaPipe eigene Bildformat (ohne OpenCV-Abhängigkeit)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_np)
         
         # Erkennung ausführen
@@ -57,7 +75,7 @@ if uploaded_file is not None:
         draw = ImageDraw.Draw(image)
         width, height = image.size
         
-        if detection_result.pose_landmarks:
+        if detection_result.pose_landmarks and len(detection_result.pose_landmarks) > 0:
             # Wir extrahieren die Landmarks für die rechte Seite
             # Indizes: Hüfte = 24, Knie = 26, Knöchel = 28
             landmarks = detection_result.pose_landmarks[0]
