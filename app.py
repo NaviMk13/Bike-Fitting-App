@@ -7,10 +7,9 @@ from torchvision.models.detection import keypointrcnn_resnet50_fpn, KeypointRCNN
 import av
 import tempfile
 import os
-import time
 
 # --- 1. DESIGN & FAHRRAD-VIBE (CUSTOM CSS) ---
-st.set_page_config(page_title="Custom KI Bike Fitter Pro", layout="wide", page_icon="🚴")
+st.set_page_config(page_title="VELO-MATCH KI Bike Fitter", layout="wide", page_icon="🚴")
 
 st.markdown("""
     <style>
@@ -39,6 +38,7 @@ st.markdown("""
         padding: 20px;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         backdrop-filter: blur(8px);
+        margin-bottom: 15px;
     }
     
     /* Fahrrad-Animation beim Laden */
@@ -54,9 +54,9 @@ st.markdown("""
         margin: 20px 0;
     }
     </style>
-""", unsafe_scale=True)
+""", unsafe_allow_html=True) # HIER WAR DER FEHLER (jetzt korrekt unsafe_allow_html)
 
-st.title("🚴 VELO-MATCH: AI DYNAMIC BIE FITTING")
+st.title("🚴 VELO-MATCH: AI DYNAMIC BIKE FITTING")
 st.write("Optimiere deine Aero-Position und Ergonomie. Lade deine seitliche Videoaufnahme hoch.")
 
 # --- 2. KI-MODELL INITIALISIERUNG ---
@@ -85,9 +85,9 @@ def calculate_angle(a, b, c, interior=True):
     angle = np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0)))
     
     if not interior:
-        return angle # Gibt den gestreckten Außenwinkel zurück (z.B. Kniewinkel ~140°)
+        return angle # Außenwinkel (z.B. Kniewinkel ~140°-145°)
     else:
-        # Berechnet den echten Beugewinkel (z.B. Armbeugung ~20° aus der Streckung)
+        # Berechnet den echten Beugewinkel aus der Streckung heraus (z.B. Armbeugung ~20°)
         return 180.0 - angle if angle > 90 else angle
 
 # --- 4. DYNAMISCHE ANALYSE ---
@@ -139,10 +139,10 @@ if model_loaded:
                         h, k, a = kp[11][:2], kp[13][:2], kp[15][:2]
                         s, e, w = kp[5][:2], kp[7][:2], kp[9][:2]
                     
-                    # Winkel berechnen (Knie und Hüfte als Außenstreckung, Arme als Innenbeugung)
+                    # Winkel berechnen
                     knee_angle = calculate_angle(h, k, a, interior=False)
                     hip_angle = calculate_angle(s, h, k, interior=False)
-                    arm_angle = calculate_angle(s, e, w, interior=True)   # Jetzt korrekt als Beugewinkel!
+                    arm_angle = calculate_angle(s, e, w, interior=True)   
                     shoulder_angle = calculate_angle(h, s, e, interior=False)
                     
                     # Zeichnen der Overlays auf dem aktuellen Frame
@@ -183,66 +183,4 @@ if model_loaded:
         loader_anim.empty()
         
         if frames_data and processed_images:
-            st.success("🏁 Analyse beendet! Unten findest du deine Auswertung.")
-            
-            # --- NEUES FEATURE: LIVE-VIDEO-PRÄSENTATION DER GELENKE ---
-            st.header("📹 Dein analysierter Trittzyklus")
-            st.write("Bewege den Schieberegler, um die Gelenkbewegungen genau zu studieren:")
-            
-            frame_slider = st.slider("Frame auswähle", min_value=0, max_value=len(processed_images)-1, value=0)
-            st.image(processed_images[frame_slider], caption=f"Frame {frame_slider} - Gelenktreue Visualisierung", use_container_width=True)
-            
-            # Extremwerte ermitteln (Maximale Beinstreckung bei ca. 6 Uhr)
-            max_ext_idx = np.argmax([f['knee'] for f in frames_data])
-            best_fit = frames_data[max_ext_idx]
-            
-            # --- GEÄNDERTE METRICS & EDITIERTE LOGIK ---
-            st.header(f"📊 Ergonomie-Auswertung ({best_fit['side']})")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
-                st.metric(label="🦵 Kniewinkel (Streckung)", value=f"{best_fit['knee']:.1f}°", delta="Optimal: 140°-145°")
-                st.markdown("</div>", unsafe_allow_html=True)
-                
-            with col2:
-                st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
-                st.metric(label="🧘 Hüftwinkel", value=f"{best_fit['hip']:.1f}°", delta="Optimal: 40°-50°")
-                st.markdown("</div>", unsafe_allow_html=True)
-                
-            with col3:
-                st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
-                # JETZT KORREKT: Zeigt z.B. 15.4° Beugung an statt 164°
-                st.metric(label="💪 Ellbogenbeugung", value=f"{best_fit['arm']:.1f}°", delta="Optimal: 15°-25°")
-                st.markdown("</div>", unsafe_allow_html=True)
-                
-            with col4:
-                st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
-                st.metric(label="📐 Schulterwinkel", value=f"{best_fit['shoulder']:.1f}°", delta="Optimal: 80°-90°")
-                st.markdown("</div>", unsafe_allow_html=True)
-            
-            # --- EXPERTEN BIKE-FITTING FAZIT ---
-            st.header("🛠️ Personalisierte Setup-Empfehlungen")
-            
-            # 1. Sattelhöhen-Check
-            if best_fit['knee'] > 146:
-                st.error("⚠️ **Sattelhöhe:** Dein Sattel steht etwas **zu hoch**.")
-                st.write("Deine Sehnen in der Kniekehle werden überstreckt. Senke den Sattel um ca. 4-6 mm ab.")
-            elif best_fit['knee'] < 139:
-                st.warning("⚠️ **Sattelhöhe:** Dein Sattel ist **zu niedrig**.")
-                st.write("Schiebe den Sattel stückweise nach oben, um Knieschmerzen an der Vorderseite zu vermeiden.")
-            else:
-                st.success("🎉 **Sattelhöhe:** Perfekt eingestellt! Die Kraftübertragung ist maximal effizient.")
-                
-            # 2. Cockpit- & Ellbogen-Check (Jetzt mit mathematisch korrekter Logik!)
-            if best_fit['arm'] < 12:
-                st.error("⚠️ **Cockpit-Ergonomie:** Deine Arme sind **zu stark durchgestreckt**.")
-                st.write("Das blockiert die Stoßdämpfung deiner Gelenke und führt zu Nackenbeschwerden. Wähle einen kürzeren Vorbau oder erhöhe den Lenker (Stack).")
-            elif best_fit['arm'] > 28:
-                st.warning("⚠️ **Cockpit-Ergonomie:** Deine Armbeugung ist sehr ausgeprägt.")
-                st.write("Du sitzt sehr kompakt. Überprüfe, ob du mehr Reach (längeren Vorbau) für eine aerodynamischere Haltung vertragen kannst.")
-            else:
-                st.success("🎉 **Armhaltung:** Ausgezeichnet! Deine Ellbogen sind leicht angewinkelt, um Stöße perfekt abzufangen.")
-        else:
-            st.error("Es konnten keine Gelenke im Video erkannt werden. Achte darauf, dass du komplett im Profil zu sehen bist.")
+            st.
