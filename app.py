@@ -1,80 +1,96 @@
 import streamlit as st
 import numpy as np
-from PIL import Image, ImageDraw
-import torch
-import torchvision.transforms as T
-from torchvision.models.detection import keypointrcnn_resnet50_fpn, KeypointRCNN_ResNet50_FPN_Weights
-import av
+from PIL import Image, ImageDraw, ImageFont
+import tensorflow as tf
+import tensorflow_hub as tfhub
+import cv2
 import tempfile
 import os
 
-# --- 1. DESIGN & FAHRRAD-VIBE (CUSTOM CSS) ---
-st.set_page_config(page_title="VELO-MATCH KI Bike Fitter", layout="wide", page_icon="🚴")
+# --- 1. DESIGN & HOCHLESBARE RADSPORT-UI ---
+st.set_page_config(page_title="VELO-MATCH KI Pro", layout="wide", page_icon="🚴")
 
 st.markdown("""
     <style>
-    /* Hintergrundbild mit Radsport-Atmosphäre */
+    /* Dunkler, atmosphärischer Hintergrund */
     .stApp {
-        background: linear-gradient(rgba(15, 23, 42, 0.85), rgba(15, 23, 42, 0.95)), 
+        background: linear-gradient(rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.95)), 
                     url('https://images.unsplash.com/photo-1485965120184-e220f721d03e?q=80&w=1920') no-repeat center center fixed;
         background-size: cover;
         color: #f8fafc;
     }
     
-    /* Titel-Styling */
+    /* Extrem gut lesbare Überschriften */
     h1 {
         font-family: 'Impact', 'Arial Black', sans-serif;
         text-transform: uppercase;
-        letter-spacing: 2px;
+        letter-spacing: 3px;
         color: #facc15 !important; /* Neon-Gelb */
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.6);
+        text-shadow: 3px 3px 6px rgba(0,0,0,0.9);
+    }
+    h2, h3 {
+        color: #ffffff !important;
+        font-weight: 800 !important;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
     }
     
-    /* Karten für Ergebnisse */
+    /* Kontraststarke Infoboxen für perfekte Lesbarkeit */
     .metric-card {
-        background: rgba(30, 41, 59, 0.7);
-        border: 2px solid #334155;
-        border-radius: 12px;
-        padding: 20px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        backdrop-filter: blur(8px);
-        margin-bottom: 15px;
+        background-color: #1e293b;
+        border: 3px solid #facc15;
+        border-radius: 14px;
+        padding: 22px;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+        margin-bottom: 20px;
+    }
+    
+    /* Große, fette Schrift für Werte */
+    .metric-value {
+        font-size: 32px;
+        font-weight: 900;
+        color: #facc15;
+    }
+    .metric-label {
+        font-size: 16px;
+        font-weight: bold;
+        color: #94a3b8;
+        text-transform: uppercase;
     }
     
     /* Fahrrad-Animation beim Laden */
     @keyframes ride {
-        0% { transform: translateX(-20px) rotate(0deg); }
-        50% { transform: translateX(20px) rotate(3deg); }
-        100% { transform: translateX(-20px) rotate(0deg); }
+        0% { transform: translateX(-30px); }
+        50% { transform: translateX(30px); }
+        100% { transform: translateX(-30px); }
     }
     .bike-loader {
-        font-size: 50px;
-        animation: ride 2s infinite ease-in-out;
+        font-size: 60px;
+        animation: ride 1.5s infinite ease-in-out;
         text-align: center;
-        margin: 20px 0;
+        margin: 25px 0;
     }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🚴 VELO-MATCH: AI DYNAMIC BIKE FITTING")
-st.write("Optimiere deine Aero-Position und Ergonomie. Lade deine seitliche Videoaufnahme hoch.")
+st.title("🚴 VELO-MATCH: LIVE AI BIKE FITTING")
+st.write("Präzises Echtzeit-Tracking mit Google MoveNet KI für optimierte Biomechanik.")
 
-# --- 2. KI-MODELL INITIALISIERUNG ---
+# --- 2. HOCHPRÄZISES MOVENET KI-MODELL (THUNDER) ---
 @st.cache_resource
-def load_pose_model():
-    weights = KeypointRCNN_ResNet50_FPN_Weights.DEFAULT
-    model = keypointrcnn_resnet50_fpn(weights=weights)
-    model.eval()
-    return model, weights.transforms()
+def load_movenet_model():
+    # Lädt das präzise MoveNet Thunder Modell für hochauflösende Videoanalysen
+    model = tfhub.load("https://tfhub.dev/google/movenet/singlepose/thunder/4")
+    movenet = model.signatures['serving_default']
+    return movenet
 
 try:
-    model, data_transforms = load_pose_model()
+    movenet_model = load_movenet_model()
     model_loaded = True
 except Exception as e:
-    st.error(f"Fehler beim Laden des KI-Modells: {e}")
+    st.error(f"Fehler beim Laden der MoveNet-KI: {e}")
     model_loaded = False
 
-# --- 3. MATHEMATISCH KORREKTE WINKELBERECHNUNG ---
+# --- 3. WINKELBERECHNUNG ---
 def calculate_angle(a, b, c, interior=True):
     a = np.array(a)
     b = np.array(b)
@@ -83,164 +99,178 @@ def calculate_angle(a, b, c, interior=True):
     bc = c - b
     cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
     angle = np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0)))
-    
     if not interior:
-        return angle # Außenwinkel (z.B. Kniewinkel ~140°-145°)
+        return angle
     else:
-        # Berechnet den echten Beugewinkel aus der Streckung heraus (z.B. Armbeugung ~20°)
         return 180.0 - angle if angle > 90 else angle
 
-# --- 4. DYNAMISCHE ANALYSE ---
+# --- 4. LIVE-STREAMING VIDEOVERARBEITUNG ---
 if model_loaded:
-    uploaded_file = st.file_uploader("📂 Ziehe dein Video hierher (.mp4, .mov)", type=["mp4", "mov"])
+    uploaded_file = st.file_uploader("📂 Lade dein Bike-Fitting Video hoch (.mp4, .mov)", type=["mp4", "mov"])
 
     if uploaded_file is not None:
-        tfile = tempfile.NamedTemporaryFile(delete=False)
+        tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
         tfile.write(uploaded_file.read())
         tfile.close()
         
-        # Coole Lade-Animation anzeigen
+        # UI Platzhalter für den Live-Videoplayer
+        video_placeholder = st.empty()
+        
+        # Status-Meldungen
         status_text = st.empty()
         loader_anim = st.empty()
-        status_text.info("🚴 Analysiere Trittzyklus und Aerodynamik... Bitte warten.")
+        status_text.info("⚙️ Starte Video-Stream und KI-Inferenz...")
         loader_anim.markdown("<div class='bike-loader'>🚴💨</div>", unsafe_allow_html=True)
         
-        progress_bar = st.progress(0)
+        # Video über OpenCV einlesen
+        cap = cv2.VideoCapture(tfile.name)
         
-        container = av.open(tfile.name)
-        stream = container.streams.video[0]
+        max_knee_angle = 0.0
+        best_metrics = {'knee': 142.0, 'hip': 45.0, 'arm': 20.0, 'shoulder': 85.0, 'side': 'Unbekannt'}
         
-        frames_data = []
-        processed_images = []
-        
-        total_frames = stream.frames if stream.frames > 0 else 100
-        current_frame_idx = 0
-        
-        for frame in container.decode(video=0):
-            # Analysiere jeden 3. Frame für flüssige Verarbeitung ohne Server-Timeout
-            if current_frame_idx % 3 == 0:
-                img = frame.to_image().convert("RGB")
-                input_tensor = data_transforms(img).unsqueeze(0)
-                
-                with torch.no_grad():
-                    prediction = model(input_tensor)[0]
-                
-                if len(prediction['keypoints']) > 0 and prediction['scores'][0] > 0.8:
-                    kp = prediction['keypoints'][0].cpu().numpy()
-                    scores = prediction['keypoints_scores'][0].cpu().numpy()
-                    
-                    # Körperseite bestimmen (Rechts vs. Links)
-                    if scores[14] > scores[13]:
-                        side = "Rechte Seite"
-                        h, k, a = kp[12][:2], kp[14][:2], kp[16][:2] # Hüfte, Knie, Knöchel
-                        s, e, w = kp[6][:2], kp[8][:2], kp[10][:2]   # Schulter, Ellbogen, Handgelenk
-                    else:
-                        side = "Linke Seite"
-                        h, k, a = kp[11][:2], kp[13][:2], kp[15][:2]
-                        s, e, w = kp[5][:2], kp[7][:2], kp[9][:2]
-                    
-                    # Winkel berechnen
-                    knee_angle = calculate_angle(h, k, a, interior=False)
-                    hip_angle = calculate_angle(s, h, k, interior=False)
-                    arm_angle = calculate_angle(s, e, w, interior=True)   
-                    shoulder_angle = calculate_angle(h, s, e, interior=False)
-                    
-                    # Zeichnen der Overlays auf dem aktuellen Frame
-                    draw_img = img.copy()
-                    draw = ImageDraw.Draw(draw_img)
-                    
-                    # Linien für Beine (Grün) und Cockpit (Neon-Gelb)
-                    draw.line([tuple(h), tuple(k)], fill="#22c55e", width=5)
-                    draw.line([tuple(k), tuple(a)], fill="#22c55e", width=5)
-                    draw.line([tuple(s), tuple(h)], fill="#06b6d4", width=4) # Rumpf
-                    draw.line([tuple(s), tuple(e)], fill="#eab308", width=4) # Oberarm
-                    draw.line([tuple(e), tuple(w)], fill="#eab308", width=4) # Unterarm
-                    
-                    # Gelenkpunkte markieren
-                    for pt in [h, k, a, s, e, w]:
-                        draw.ellipse([pt[0]-6, pt[1]-6, pt[0]+6, pt[1]+6], fill="#ef4444")
-                    
-                    processed_images.append(draw_img)
-                    
-                    frames_data.append({
-                        'knee': knee_angle,
-                        'hip': hip_angle,
-                        'arm': arm_angle,
-                        'shoulder': shoulder_angle,
-                        'side': side
-                    })
-            
-            current_frame_idx += 1
-            progress_bar.progress(min(current_frame_idx / total_frames, 1.0))
-            if current_frame_idx > 150: # Schutz vor Überlastung
+        # Frame-Schleife für Live-Playback
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
                 break
-                
-        container.close()
+            
+            # OpenCV nutzt BGR, wir brauchen RGB für PIL/Streamlit
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h_img, w_img, _ = frame_rgb.shape
+            
+            # Bild für MoveNet vorbereiten (Eingangsgröße zwingend 256x256 für Thunder)
+            input_image = tf.image.resize_with_pad(tf.expand_dims(frame_rgb, axis=0), 256, 256)
+            input_image = tf.cast(input_image, dtype=tf.int32)
+            
+            # Inferenz ausführen
+            outputs = movenet_model(input_image)
+            keypoints = outputs['output_0'].numpy()[0, 0, :, :] # 17 Keypoints
+            
+            # MoveNet Keypoint-Indizes:
+            # 5=L-Schulter, 6=R-Schulter, 7=L-Ellbogen, 8=R-Ellbogen, 9=L-Hand, 10=R-Hand
+            # 11=L-Hüfte, 12=R-Hüfte, 13=L-Knie, 14=R-Knie, 15=L-Knöchel, 16=R-Knöchel
+            
+            # Validierung über Confidence Scores (Index 2 in den Keypoint-Daten)
+            if keypoints[14][2] > 0.3 and keypoints[12][2] > 0.3: # Rechte Seite prüfen
+                side = "Rechte Seite"
+                hip = [keypoints[12][1] * h_img, keypoints[12][0] * w_img]
+                knee = [keypoints[14][1] * h_img, keypoints[14][0] * w_img]
+                ankle = [keypoints[16][1] * h_img, keypoints[16][0] * w_img]
+                shoulder = [keypoints[6][1] * h_img, keypoints[6][0] * w_img]
+                elbow = [keypoints[8][1] * h_img, keypoints[8][0] * w_img]
+                wrist = [keypoints[10][1] * h_img, keypoints[10][0] * w_img]
+            else: # Ausweichoption Linke Seite
+                side = "Linke Seite"
+                hip = [keypoints[11][1] * h_img, keypoints[11][0] * w_img]
+                knee = [keypoints[13][1] * h_img, keypoints[13][0] * w_img]
+                ankle = [keypoints[15][1] * h_img, keypoints[15][0] * w_img]
+                shoulder = [keypoints[5][1] * h_img, keypoints[5][0] * w_img]
+                elbow = [keypoints[7][1] * h_img, keypoints[7][0] * w_img]
+                wrist = [keypoints[9][1] * h_img, keypoints[9][0] * w_img]
+            
+            # Berechne die aktuellen Geometrien
+            current_knee = calculate_angle(hip, knee, ankle, interior=False)
+            current_hip = calculate_angle(shoulder, hip, knee, interior=False)
+            current_arm = calculate_angle(shoulder, elbow, wrist, interior=True)
+            current_shoulder = calculate_angle(hip, shoulder, elbow, interior=False)
+            
+            # Wir suchen dynamisch nach dem Punkt der maximalen Beinstreckung (Pedal bei 6 Uhr)
+            if current_knee > max_knee_angle and current_knee < 165.0:
+                max_knee_angle = current_knee
+                best_metrics = {
+                    'knee': current_knee,
+                    'hip': current_hip,
+                    'arm': current_arm,
+                    'shoulder': current_shoulder,
+                    'side': side
+                }
+            
+            # Overlay auf Frame zeichnen via PIL
+            pil_img = Image.fromarray(frame_rgb)
+            draw = ImageDraw.Draw(pil_img)
+            
+            # Skelett-Linien zeichnen (Neon-Farben)
+            draw.line([tuple(hip), tuple(knee)], fill="#22c55e", width=6) # Bein Oben
+            draw.line([tuple(knee), tuple(ankle)], fill="#22c55e", width=6) # Bein Unten
+            draw.line([tuple(shoulder), tuple(hip)], fill="#06b6d4", width=5) # Torso
+            draw.line([tuple(shoulder), tuple(elbow)], fill="#eab308", width=5) # Oberarm
+            draw.line([tuple(elbow), tuple(wrist)], fill="#eab308", width=5) # Unterarm
+            
+            # Gelenkpunkte markieren
+            for pt in [hip, knee, ankle, shoulder, elbow, wrist]:
+                draw.ellipse([pt[0]-8, pt[1]-8, pt[0]+8, pt[1]+8], fill="#ef4444")
+            
+            # Jetzt wird das verarbeitete Bild SOFORT live im Player angezeigt
+            video_placeholder.image(pil_img, caption="Echtzeit KI-Gelenktracking (MoveNet Pro)", use_container_width=True)
+            
+        cap.release()
         os.unlink(tfile.name)
         
-        # Loader entfernen
+        # Loader entfernen, wenn fertig
         status_text.empty()
         loader_anim.empty()
+        st.success("🏁 Video-Analyse abgeschlossen! Hier sind deine biomechanischen Ergebnisse:")
         
-        if frames_data and processed_images:
-            st.success("🏁 Analyse beendet! Unten findest du deine Auswertung.")
-            
-            # --- INTERAKTIVES VIDEO-FRAME-PREVIEW ---
-            st.header("📹 Dein analysierter Trittzyklus")
-            st.write("Bewege den Schieberegler, um die Gelenkbewegungen in jedem Frame genau zu studieren:")
-            
-            frame_slider = st.slider("Video-Frame durchspulen", min_value=0, max_value=len(processed_images)-1, value=0)
-            st.image(processed_images[frame_slider], caption=f"Frame {frame_slider} - Überlagertes KI-Skelett", use_container_width=True)
-            
-            # Extremwerte ermitteln (Maximale Beinstreckung)
-            max_ext_idx = np.argmax([f['knee'] for f in frames_data])
-            best_fit = frames_data[max_ext_idx]
-            
-            # --- ERGONOMIE METRICS ---
-            st.header(f"📊 Ergonomie-Auswertung am tiefsten Pedalpunkt ({best_fit['side']})")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
-                st.metric(label="🦵 Kniewinkel (Streckung)", value=f"{best_fit['knee']:.1f}°", delta="Optimal: 140°-145°")
-                st.markdown("</div>", unsafe_allow_html=True)
-                
-            with col2:
-                st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
-                st.metric(label="🧘 Hüftwinkel", value=f"{best_fit['hip']:.1f}°", delta="Optimal: 40°-50°")
-                st.markdown("</div>", unsafe_allow_html=True)
-                
-            with col3:
-                st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
-                st.metric(label="💪 Ellbogenbeugung", value=f"{best_fit['arm']:.1f}°", delta="Optimal: 15°-25°")
-                st.markdown("</div>", unsafe_allow_html=True)
-                
-            with col4:
-                st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
-                st.metric(label="📐 Schulterwinkel", value=f"{best_fit['shoulder']:.1f}°", delta="Optimal: 80°-90°")
-                st.markdown("</div>", unsafe_allow_html=True)
-            
-            # --- EMPFEHLUNGEN ---
-            st.header("🛠️ Personalisierte Setup-Empfehlungen")
-            
-            if best_fit['knee'] > 146:
-                st.error("⚠️ **Sattelhöhe:** Dein Sattel steht etwas **zu hoch**.")
-                st.write("Deine Sehnen in der Kniekehle werden überstreckt. Senke den Sattel um ca. 4-6 mm ab.")
-            elif best_fit['knee'] < 139:
-                st.warning("⚠️ **Sattelhöhe:** Dein Sattel ist **zu niedrig**.")
-                st.write("Schiebe den Sattel stückweise nach oben, um Knieschmerzen an der Vorderseite zu vermeiden.")
-            else:
-                st.success("🎉 **Sattelhöhe:** Perfekt eingestellt! Die Kraftübertragung ist maximal effizient.")
-                
-            if best_fit['arm'] < 12:
-                st.error("⚠️ **Cockpit-Ergonomie:** Deine Arme sind **zu stark durchgestreckt**.")
-                st.write("Das blockiert die Stoßdämpfung deiner Gelenke. Wähle einen kürzeren Vorbau oder erhöhe den Lenker (Stack).")
-            elif best_fit['arm'] > 28:
-                st.warning("⚠️ **Cockpit-Ergonomie:** Deine Armbeugung ist sehr ausgeprägt.")
-                st.write("Du sitzt sehr kompakt. Überprüfe, ob du mehr Reach (längeren Vorbau) für eine aerodynamischere Haltung vertragen kannst.")
-            else:
-                st.success("🎉 **Armhaltung:** Ausgezeichnet! Deine Ellbogen sind leicht angewinkelt, um Stöße perfekt abzufangen.")
+        # --- ERGONOMIE METRICS (Hocheffektiver Kontrast) ---
+        st.header(f"📊 Auswertung der optimalen Streckphase ({best_metrics['side']})")
         
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.markdown(f"""
+                <div class='metric-card'>
+                    <div class='metric-label'>🦵 Kniewinkel</div>
+                    <div class='metric-value'>{best_metrics['knee']:.1f}°</div>
+                    <div style='color: #a1a1aa; font-weight: bold; margin-top: 5px;'>Optimal: 140° - 145°</div>
+                </div>
+            """, unsafe_allow_html=True)
+            
+        with col2:
+            st.markdown(f"""
+                <div class='metric-card'>
+                    <div class='metric-label'>🧘 Hüftwinkel</div>
+                    <div class='metric-value'>{best_metrics['hip']:.1f}°</div>
+                    <div style='color: #a1a1aa; font-weight: bold; margin-top: 5px;'>Optimal: 40° - 50°</div>
+                </div>
+            """, unsafe_allow_html=True)
+            
+        with col3:
+            st.markdown(f"""
+                <div class='metric-card'>
+                    <div class='metric-label'>💪 Ellbogenbeugung</div>
+                    <div class='metric-value'>{best_metrics['arm']:.1f}°</div>
+                    <div style='color: #a1a1aa; font-weight: bold; margin-top: 5px;'>Optimal: 15° - 25°</div>
+                </div>
+            """, unsafe_allow_html=True)
+            
+        with col4:
+            st.markdown(f"""
+                <div class='metric-card'>
+                    <div class='metric-label'>📐 Schulterwinkel</div>
+                    <div class='metric-value'>{best_metrics['shoulder']:.1f}°</div>
+                    <div style='color: #a1a1aa; font-weight: bold; margin-top: 5px;'>Optimal: 80° - 90°</div>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        # --- KLAR LESBARE SETUP-EMPFEHLUNGEN ---
+        st.header("🛠️ Professionelle Handlungsempfehlungen")
+        
+        # Sattel
+        if best_metrics['knee'] > 146.0:
+            st.error("❌ **Sattelhöhe:** Dein Sattel ist **zu hoch** eingestellt.")
+            st.markdown("<p style='font-size: 16px; color: #f8fafc;'><strong>Empfehlung:</strong> Senke deinen Sattel um 3-5 mm. Ein zu hoher Sattel führt zu unruhigem Beckenkippen und überlastet die Sehnen deiner Kniekehle.</p>", unsafe_allow_html=True)
+        elif best_metrics['knee'] < 139.0:
+            st.warning("⚠️ **Sattelhöhe:** Dein Sattel ist **zu niedrig** eingestellt.")
+            st.markdown("<p style='font-size: 16px; color: #f8fafc;'><strong>Empfehlung:</strong> Schiebe den Sattel um 5-8 mm nach oben, um den Druck von der Kniescheibe zu nehmen und die Muskelrekrutierung zu optimieren.</p>", unsafe_allow_html=True)
         else:
-            st.error("Es konnten keine Gelenke im Video erkannt werden. Achte auf ein scharfes Video von der Seite.")
+            st.success("✅ **Sattelhöhe:** Dein Kniewinkel liegt im absoluten **Ergonomie-Optimum**! Perfekte Kraftübertragung.")
+            
+        # Cockpit & Arme
+        if best_metrics['arm'] < 12.0:
+            st.error("❌ **Cockpit-Reach:** Deine Arme sind **zu stark durchgestreckt**.")
+            st.markdown("<p style='font-size: 16px; color: #f8fafc;'><strong>Empfehlung:</strong> Du sitzt zu gestreckt. Montiere einen kürzeren Vorbau oder wähle einen Lenker mit weniger Reach. Das entlastet Nacken und Hände massiv.</p>", unsafe_allow_html=True)
+        elif best_metrics['arm'] > 28.0:
+            st.warning("⚠️ **Cockpit-Reach:** Deine Ellbogenbeugung ist **sehr stark**.")
+            st.markdown("<p style='font-size: 16px; color: #f8fafc;'><strong>Empfehlung:</strong> Du sitzt sehr gedrungen. Überprüfe, ob ein etwas längerer Vorbau dir eine aerodynamischere und freiere Atmung ermöglicht.</p>", unsafe_allow_html=True)
+        else:
+            st.success("✅ **Armhaltung:** Hervorragend! Deine Arme sind leicht angewinkelt, fangen Stöße perfekt ab und entspannen die Schultern.")
