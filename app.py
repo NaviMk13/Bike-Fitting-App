@@ -183,4 +183,5 @@ if model_loaded:
         loader_anim.empty()
         
         if frames_data and processed_images:
-            st.
+            else:
+            st.error("Es konnten keine Gelenke im Video erkannt werden. Achte auf ein scharfes Video von der Seite.")
