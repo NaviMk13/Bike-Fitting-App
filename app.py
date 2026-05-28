@@ -1,28 +1,9 @@
-# --- 0. ULTIMATIVER COMPATIBILITY-HOTFIX (MUSS GANZ OBEN STEHEN) ---
-import sys
-from types import ModuleType
-
-# Wir erstellen ein leeres Fake-Modul für cv2, damit MediaPipe beim Importieren 
-# nicht abstürzt, falls die echten Grafikbibliotheken auf dem Server fehlen.
-if "cv2" not in sys.modules:
-    fake_cv2 = ModuleType("cv2")
-    # Wir fügen minimale Attribute hinzu, falls MediaPipe intern danach sucht
-    fake_cv2.__dict__.update({
-        "VideoCapture": None,
-        "cvtColor": None,
-        "COLOR_BGR2RGB": 4,
-        "COLOR_RGB2BGR": 5
-    })
-    sys.modules["cv2"] = fake_cv2
-
-# --- AB HIER FOLGT DER NORMALE CODE ---
 import streamlit as st
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import numpy as np
 from PIL import Image, ImageDraw
-import tempfile
 import os
 import urllib.request
 
@@ -65,7 +46,7 @@ if uploaded_file is not None:
     )
     
     with vision.PoseLandmarker.create_from_options(options) as landmarker:
-        # Konvertiere in das MediaPipe eigene Bildformat (ohne OpenCV-Abhängigkeit)
+        # Konvertiere in das MediaPipe eigene Bildformat
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_np)
         
         # Erkennung ausführen
