@@ -54,7 +54,7 @@ st.markdown("""
         margin: 20px 0;
     }
     </style>
-""", unsafe_allow_html=True) # HIER WAR DER FEHLER (jetzt korrekt unsafe_allow_html)
+""", unsafe_allow_html=True)
 
 st.title("🚴 VELO-MATCH: AI DYNAMIC BIKE FITTING")
 st.write("Optimiere deine Aero-Position und Ergonomie. Lade deine seitliche Videoaufnahme hoch.")
@@ -183,5 +183,64 @@ if model_loaded:
         loader_anim.empty()
         
         if frames_data and processed_images:
+            st.success("🏁 Analyse beendet! Unten findest du deine Auswertung.")
+            
+            # --- INTERAKTIVES VIDEO-FRAME-PREVIEW ---
+            st.header("📹 Dein analysierter Trittzyklus")
+            st.write("Bewege den Schieberegler, um die Gelenkbewegungen in jedem Frame genau zu studieren:")
+            
+            frame_slider = st.slider("Video-Frame durchspulen", min_value=0, max_value=len(processed_images)-1, value=0)
+            st.image(processed_images[frame_slider], caption=f"Frame {frame_slider} - Überlagertes KI-Skelett", use_container_width=True)
+            
+            # Extremwerte ermitteln (Maximale Beinstreckung)
+            max_ext_idx = np.argmax([f['knee'] for f in frames_data])
+            best_fit = frames_data[max_ext_idx]
+            
+            # --- ERGONOMIE METRICS ---
+            st.header(f"📊 Ergonomie-Auswertung am tiefsten Pedalpunkt ({best_fit['side']})")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
+                st.metric(label="🦵 Kniewinkel (Streckung)", value=f"{best_fit['knee']:.1f}°", delta="Optimal: 140°-145°")
+                st.markdown("</div>", unsafe_allow_html=True)
+                
+            with col2:
+                st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
+                st.metric(label="🧘 Hüftwinkel", value=f"{best_fit['hip']:.1f}°", delta="Optimal: 40°-50°")
+                st.markdown("</div>", unsafe_allow_html=True)
+                
+            with col3:
+                st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
+                st.metric(label="💪 Ellbogenbeugung", value=f"{best_fit['arm']:.1f}°", delta="Optimal: 15°-25°")
+                st.markdown("</div>", unsafe_allow_html=True)
+                
+            with col4:
+                st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
+                st.metric(label="📐 Schulterwinkel", value=f"{best_fit['shoulder']:.1f}°", delta="Optimal: 80°-90°")
+                st.markdown("</div>", unsafe_allow_html=True)
+            
+            # --- EMPFEHLUNGEN ---
+            st.header("🛠️ Personalisierte Setup-Empfehlungen")
+            
+            if best_fit['knee'] > 146:
+                st.error("⚠️ **Sattelhöhe:** Dein Sattel steht etwas **zu hoch**.")
+                st.write("Deine Sehnen in der Kniekehle werden überstreckt. Senke den Sattel um ca. 4-6 mm ab.")
+            elif best_fit['knee'] < 139:
+                st.warning("⚠️ **Sattelhöhe:** Dein Sattel ist **zu niedrig**.")
+                st.write("Schiebe den Sattel stückweise nach oben, um Knieschmerzen an der Vorderseite zu vermeiden.")
             else:
+                st.success("🎉 **Sattelhöhe:** Perfekt eingestellt! Die Kraftübertragung ist maximal effizient.")
+                
+            if best_fit['arm'] < 12:
+                st.error("⚠️ **Cockpit-Ergonomie:** Deine Arme sind **zu stark durchgestreckt**.")
+                st.write("Das blockiert die Stoßdämpfung deiner Gelenke. Wähle einen kürzeren Vorbau oder erhöhe den Lenker (Stack).")
+            elif best_fit['arm'] > 28:
+                st.warning("⚠️ **Cockpit-Ergonomie:** Deine Armbeugung ist sehr ausgeprägt.")
+                st.write("Du sitzt sehr kompakt. Überprüfe, ob du mehr Reach (längeren Vorbau) für eine aerodynamischere Haltung vertragen kannst.")
+            else:
+                st.success("🎉 **Armhaltung:** Ausgezeichnet! Deine Ellbogen sind leicht angewinkelt, um Stöße perfekt abzufangen.")
+        
+        else:
             st.error("Es konnten keine Gelenke im Video erkannt werden. Achte auf ein scharfes Video von der Seite.")
