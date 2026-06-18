@@ -1,5 +1,5 @@
 streamlit
+opencv-python-headless
 ultralytics
 numpy
-opencv-python-headless
 av
