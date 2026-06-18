@@ -98,13 +98,13 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🚴 VELO-MATCH: LIVE AI BIKE FITTING")
-st.write("Echtzeit-Tracking mit YOLOv8-Pose für Python 3.14. Generiert einen interaktiven Video-Player mit Overlays.")
+st.write("Echtzeit-Tracking mit hochpräziser YOLOv8-Medium KI. Generiert einen interaktiven Video-Player mit Overlays.")
 
-# --- 2. HÖCHST KOMPATIBLES KI-MODELL (YOLOv8-POSE) ---
+# --- 2. UPGRADE AUF YOLOv8-MEDIUM POSE (Deutlich präziser) ---
 @st.cache_resource
 def load_yolo_model():
-    # Lädt das extrem schnelle und präzise YOLOv8 Pose Modell (wird auto-heruntergeladen)
-    return YOLO('yolov8n-pose.pt')
+    # 'yolov8m-pose.pt' hat ein tieferes Netzwerk und erkennt Gelenke extrem stabil
+    return YOLO('yolov8m-pose.pt')
 
 try:
     pose_model = load_yolo_model()
@@ -141,16 +141,14 @@ if model_loaded:
         
         status_text = st.empty()
         loader_anim = st.empty()
-        status_text.info("⚙️ YOLOv8 analysiert die Biomechanik und rendert das Video...")
+        status_text.info("⚙️ Hochpräzises KI-Modell analysiert deine Biomechanik... Bitte warten.")
         loader_anim.markdown("<div class='bike-loader'>🚴💨</div>", unsafe_allow_html=True)
         
-        # Input-Video über OpenCV öffnen
         cap = cv2.VideoCapture(tfile_in.name)
         fps = int(cap.get(cv2.CAP_PROP_FPS)) if cap.get(cv2.CAP_PROP_FPS) > 0 else 30
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         
-        # Output-Video über PyAV öffnen (garantiert perfekte H.264 HTML5 Player-Kompatibilität)
         output_container = av.open(tfile_out.name, mode='w')
         stream = output_container.add_stream('h264', rate=fps)
         stream.width = width
@@ -165,65 +163,63 @@ if model_loaded:
             if not ret:
                 break
             
-            # YOLO-Inferenz auf dem Frame laufen lassen
-            results = pose_model(frame, verbose=False)
+            # Inferenz mit leicht erhöhtem Konfidenz-Limit, um Ausreißer direkt zu filtern
+            results = pose_model(frame, conf=0.4, verbose=False)
             
             if len(results) > 0 and results[0].keypoints is not None:
-                # Hole die 2D Keypoints (x, y, Sichtbarkeit)
                 kp = results[0].keypoints.data[0].cpu().numpy()
                 
-                # YOLOv8 Pose Indizes:
-                # 5=L-Schulter, 6=R-Schulter, 7=L-Ellbogen, 8=R-Ellbogen, 9=L-Hand, 10=R-Hand
-                # 11=L-Hüfte, 12=R-Hüfte, 13=L-Knie, 14=R-Knie, 15=L-Knöchel, 16=R-Knöchel
-                
+                # Prüfen, ob genügend Punkte erkannt wurden
                 if len(kp) >= 17:
-                    # Bestimme die sichtbare Körperseite anhand des Vertrauenswerts
+                    # Bestimme die dem Objektiv zugewandte Körperseite (Knie-Konfidenz als Indikator)
+                    # 13 = Linkes Knie, 14 = Rechtes Knie
                     if kp[14][2] > kp[13][2]:
                         side = "Rechte Seite"
                         hip, knee, ankle = kp[12][:2], kp[14][:2], kp[16][:2]
                         shoulder, elbow, wrist = kp[6][:2], kp[8][:2], kp[10][:2]
+                        confidences = [kp[12][2], kp[14][2], kp[16][2], kp[6][2], kp[8][2], kp[10][2]]
                     else:
                         side = "Linke Seite"
                         hip, knee, ankle = kp[11][:2], kp[13][:2], kp[15][:2]
                         shoulder, elbow, wrist = kp[5][:2], kp[7][:2], kp[9][:2]
+                        confidences = [kp[11][2], kp[13][2], kp[15][2], kp[5][2], kp[7][2], kp[9][2]]
                     
-                    # Winkel berechnen
-                    current_knee = calculate_angle(hip, knee, ankle, interior=False)
-                    current_hip = calculate_angle(shoulder, hip, knee, interior=False)
-                    current_arm = calculate_angle(shoulder, elbow, wrist, interior=True)
-                    current_shoulder = calculate_angle(hip, shoulder, elbow, interior=False)
-                    
-                    if current_knee > max_knee_angle and current_knee < 165.0:
-                        max_knee_angle = current_knee
-                        best_metrics = {
-                            'knee': current_knee,
-                            'hip': current_hip,
-                            'arm': current_arm,
-                            'shoulder': current_shoulder,
-                            'side': side
-                        }
-                    
-                    # Hochkontrast-Skelettlinien einzeichnen (BGR Format für OpenCV)
-                    cv2.line(frame, (int(hip[0]), int(hip[1])), (int(knee[0]), int(knee[1])), (34, 197, 94), 6)      # Neon-Grün
-                    cv2.line(frame, (int(knee[0]), int(knee[1])), (int(ankle[0]), int(ankle[1])), (34, 197, 94), 6)  
-                    cv2.line(frame, (int(shoulder[0]), int(shoulder[1])), (int(hip[0]), int(hip[1])), (212, 182, 6), 5) # Cyan
-                    cv2.line(frame, (int(shoulder[0]), int(shoulder[1])), (int(elbow[0]), int(elbow[1])), (8, 179, 234), 5) # Gelb
-                    cv2.line(frame, (int(elbow[0]), int(elbow[1])), (int(wrist[0]), int(wrist[1])), (8, 179, 234), 5)
-                    
-                    # Gelenkpunkte markieren
-                    for pt in [hip, knee, ankle, shoulder, elbow, wrist]:
-                        cv2.circle(frame, (int(pt[0]), int(pt[1])), 8, (68, 68, 239), -1) # Rot
+                    # Nur zeichnen und berechnen, wenn alle Kern-Gelenke stabil erkannt wurden (>50% Sicherheit)
+                    if all(c > 0.5 for c in confidences):
+                        current_knee = calculate_angle(hip, knee, ankle, interior=False)
+                        current_hip = calculate_angle(shoulder, hip, knee, interior=False)
+                        current_arm = calculate_angle(shoulder, elbow, wrist, interior=True)
+                        current_shoulder = calculate_angle(hip, shoulder, elbow, interior=False)
+                        
+                        if current_knee > max_knee_angle and current_knee < 165.0:
+                            max_knee_angle = current_knee
+                            best_metrics = {
+                                'knee': current_knee,
+                                'hip': current_hip,
+                                'arm': current_arm,
+                                'shoulder': current_shoulder,
+                                'side': side
+                            }
+                        
+                        # Hochkontrast-Skelettlinien einzeichnen (BGR-Format)
+                        cv2.line(frame, (int(hip[0]), int(hip[1])), (int(knee[0]), int(knee[1])), (34, 197, 94), 6)      # Neon-Grün
+                        cv2.line(frame, (int(knee[0]), int(knee[1])), (int(ankle[0]), int(ankle[1])), (34, 197, 94), 6)  
+                        cv2.line(frame, (int(shoulder[0]), int(shoulder[1])), (int(hip[0]), int(hip[1])), (212, 182, 6), 5) # Cyan
+                        cv2.line(frame, (int(shoulder[0]), int(shoulder[1])), (int(elbow[0]), int(elbow[1])), (8, 179, 234), 5) # Gelb
+                        cv2.line(frame, (int(elbow[0]), int(elbow[1])), (int(wrist[0]), int(wrist[1])), (8, 179, 234), 5)
+                        
+                        # Gelenkpunkte markieren
+                        for pt in [hip, knee, ankle, shoulder, elbow, wrist]:
+                            cv2.circle(frame, (int(pt[0]), int(pt[1])), 8, (68, 68, 239), -1) # Rot
             
-            # Frame für PyAV konvertieren (von BGR nach RGB)
+            # Frame für PyAV konvertieren
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             av_frame = av.VideoFrame.from_ndarray(frame_rgb, format='rgb24')
             
-            # Frame codieren und schreiben
             for packet in stream.encode(av_frame):
                 output_container.mux(packet)
                 
         cap.release()
-        # Stream beenden
         for packet in stream.encode():
             output_container.mux(packet)
         output_container.close()
@@ -240,7 +236,6 @@ if model_loaded:
             video_bytes = video_file.read()
         st.video(video_bytes)
         
-        # Temporäre Dateien löschen
         os.unlink(tfile_in.name)
         os.unlink(tfile_out.name)
         
