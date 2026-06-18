@@ -100,10 +100,9 @@ st.markdown("""
 st.title("🚴 VELO-MATCH: LIVE AI BIKE FITTING")
 st.write("Echtzeit-Tracking mit hochpräziser YOLOv8-Medium KI. Generiert einen interaktiven Video-Player mit Overlays.")
 
-# --- 2. UPGRADE AUF YOLOv8-MEDIUM POSE (Deutlich präziser) ---
+# --- 2. KI-MODELL INITIALISIERUNG (YOLOv8-MEDIUM POSE) ---
 @st.cache_resource
 def load_yolo_model():
-    # 'yolov8m-pose.pt' hat ein tieferes Netzwerk und erkennt Gelenke extrem stabil
     return YOLO('yolov8m-pose.pt')
 
 try:
@@ -163,16 +162,14 @@ if model_loaded:
             if not ret:
                 break
             
-            # Inferenz mit leicht erhöhtem Konfidenz-Limit, um Ausreißer direkt zu filtern
+            # Inferenz mit Konfidenz-Limit, um Ausreißer direkt zu filtern
             results = pose_model(frame, conf=0.4, verbose=False)
             
             if len(results) > 0 and results[0].keypoints is not None:
                 kp = results[0].keypoints.data[0].cpu().numpy()
                 
-                # Prüfen, ob genügend Punkte erkannt wurden
                 if len(kp) >= 17:
-                    # Bestimme die dem Objektiv zugewandte Körperseite (Knie-Konfidenz als Indikator)
-                    # 13 = Linkes Knie, 14 = Rechtes Knie
+                    # Bestimme die dem Objektiv zugewandte Körperseite anhand der Knie-Sichtbarkeit
                     if kp[14][2] > kp[13][2]:
                         side = "Rechte Seite"
                         hip, knee, ankle = kp[12][:2], kp[14][:2], kp[16][:2]
@@ -184,7 +181,7 @@ if model_loaded:
                         shoulder, elbow, wrist = kp[5][:2], kp[7][:2], kp[9][:2]
                         confidences = [kp[11][2], kp[13][2], kp[15][2], kp[5][2], kp[7][2], kp[9][2]]
                     
-                    # Nur zeichnen und berechnen, wenn alle Kern-Gelenke stabil erkannt wurden (>50% Sicherheit)
+                    # Nur zeichnen und berechnen, wenn die Gelenke stabil erkannt wurden
                     if all(c > 0.5 for c in confidences):
                         current_knee = calculate_angle(hip, knee, ankle, interior=False)
                         current_hip = calculate_angle(shoulder, hip, knee, interior=False)
@@ -201,16 +198,16 @@ if model_loaded:
                                 'side': side
                             }
                         
-                        # Hochkontrast-Skelettlinien einzeichnen (BGR-Format)
-                        cv2.line(frame, (int(hip[0]), int(hip[1])), (int(knee[0]), int(knee[1])), (34, 197, 94), 6)      # Neon-Grün
-                        cv2.line(frame, (int(knee[0]), int(knee[1])), (int(ankle[0]), int(ankle[1])), (34, 197, 94), 6)  
+                        # Hochkontlettlinien einzeichnen (BGR)
+                        cv2.line(frame, (int(hip[0]), int(hip[1])), (int(knee[0]), int(knee[1])), (94, 197, 34), 6)      # Neon-Grün
+                        cv2.line(frame, (int(knee[0]), int(knee[1])), (int(ankle[0]), int(ankle[1])), (94, 197, 34), 6)  
                         cv2.line(frame, (int(shoulder[0]), int(shoulder[1])), (int(hip[0]), int(hip[1])), (212, 182, 6), 5) # Cyan
                         cv2.line(frame, (int(shoulder[0]), int(shoulder[1])), (int(elbow[0]), int(elbow[1])), (8, 179, 234), 5) # Gelb
                         cv2.line(frame, (int(elbow[0]), int(elbow[1])), (int(wrist[0]), int(wrist[1])), (8, 179, 234), 5)
                         
                         # Gelenkpunkte markieren
                         for pt in [hip, knee, ankle, shoulder, elbow, wrist]:
-                            cv2.circle(frame, (int(pt[0]), int(pt[1])), 8, (68, 68, 239), -1) # Rot
+                            cv2.circle(frame, (int(pt[0]), int(pt[1])), 8, (239, 68, 68), -1) # Rot
             
             # Frame für PyAV konvertieren
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -280,49 +277,55 @@ if model_loaded:
                 </div>
             """, unsafe_allow_html=True)
         
-        # --- 7. DEUTLICHE HANDLUNGSEMPFEHLUNGEN ---
+        # --- 7. DEUTLICHE HANDLUNGSEMPFEHLUNGEN (Logik-Fix) ---
         st.header("🛠️ Professionelle Handlungsempfehlungen")
         
-        if best_metrics['knee'] > 146.0:
+        # Rundung für exakte Abfragen ohne Überschneidungen
+        knee_angle = round(best_metrics['knee'], 1)
+        arm_angle = round(best_metrics['arm'], 1)
+        
+        # Präziser Sattel-Check
+        if knee_angle > 145.0:
             st.markdown(f"""
                 <div class='rec-box' style='border-left-color: #ef4444;'>
-                    <h3 style='margin:0; color:#ef4444 !important;'>❌ Sattelhöhe: Zu Hoch</h3>
+                    <h3 style='margin:0; color:#ef4444 !important;'>❌ Sattelhöhe: Zu Hoch ({knee_angle}°)</h3>
                     <p style='margin:10px 0 0 0;'><strong>Empfehlung:</strong> Senke deinen Sattel um 3-5 mm. Ein zu hoher Sattel führt zu unruhigem Beckenkippen und überlastet die Sehnen deiner Kniekehle.</p>
                 </div>
             """, unsafe_allow_html=True)
-        elif best_metrics['knee'] < 139.0:
+        elif knee_angle < 140.0:
             st.markdown(f"""
                 <div class='rec-box' style='border-left-color: #f59e0b;'>
-                    <h3 style='margin:0; color:#f59e0b !important;'>⚠️ Sattelhöhe: Zu Niedrig</h3>
-                    <p style='margin:10px 0 0 0;'><strong>Empfehlung:</strong> Schiebe den Sattel um 5-8 mm nach oben, um den Druck von der Kniescheibe zu nehmen.</p>
+                    <h3 style='margin:0; color:#f59e0b !important;'>⚠️ Sattelhöhe: Zu Niedrig ({knee_angle}°)</h3>
+                    <p style='margin:10px 0 0 0;'><strong>Empfehlung:</strong> Schiebe den Sattel um 5-8 mm nach oben, um den Druck von der Kniescheibe zu nehmen und die Beinstreckung zu optimieren.</p>
                 </div>
             """, unsafe_allow_html=True)
         else:
             st.markdown(f"""
                 <div class='rec-box' style='border-left-color: #22c55e;'>
-                    <h3 style='margin:0; color:#22c55e !important;'>✅ Sattelhöhe: Perfekt</h3>
-                    <p style='margin:10px 0 0 0;'>Dein Kniewinkel liegt im ergonomischen Optimum! Maximal effiziente Kraftübertragung.</p>
+                    <h3 style='margin:0; color:#22c55e !important;'>✅ Sattelhöhe: Perfekt ({knee_angle}°)</h3>
+                    <p style='margin:10px 0 0 0;'>Dein Kniewinkel liegt mit {knee_angle}° exakt im ergonomischen Optimum von 140° bis 145°! Die Kraftübertragung auf die Kurbel ist maximal effizient.</p>
                 </div>
             """, unsafe_allow_html=True)
             
-        if best_metrics['arm'] < 12.0:
+        # Präziser Cockpit-Check
+        if arm_angle < 15.0:
             st.markdown(f"""
                 <div class='rec-box' style='border-left-color: #ef4444;'>
-                    <h3 style='margin:0; color:#ef4444 !important;'>❌ Cockpit-Reach: Zu Gestreckt</h3>
+                    <h3 style='margin:0; color:#ef4444 !important;'>❌ Cockpit-Reach: Zu Gestreckt ({arm_angle}°)</h3>
                     <p style='margin:10px 0 0 0;'><strong>Empfehlung:</strong> Deine Arme sind zu stark durchgestreckt. Ein kürzerer Vorbau oder ein Lenker mit weniger Reach entlastet Hände und Nacken massiv.</p>
                 </div>
             """, unsafe_allow_html=True)
-        elif best_metrics['arm'] > 28.0:
+        elif arm_angle > 25.0:
             st.markdown(f"""
                 <div class='rec-box' style='border-left-color: #f59e0b;'>
-                    <h3 style='margin:0; color:#f59e0b !important;'>⚠️ Cockpit-Reach: Zu Kompakt</h3>
+                    <h3 style='margin:0; color:#f59e0b !important;'>⚠️ Cockpit-Reach: Zu Kompakt ({arm_angle}°)</h3>
                     <p style='margin:10px 0 0 0;'><strong>Empfehlung:</strong> Du sitzt sehr gedrungen. Überprüfe, ob dir ein etwas längerer Vorbau eine sportlichere Position ermöglicht.</p>
                 </div>
             """, unsafe_allow_html=True)
         else:
             st.markdown(f"""
                 <div class='rec-box' style='border-left-color: #22c55e;'>
-                    <h3 style='margin:0; color:#22c55e !important;'>✅ Armhaltung: Optimal</h3>
+                    <h3 style='margin:0; color:#22c55e !important;'>✅ Armhaltung: Optimal ({arm_angle}°)</h3>
                     <p style='margin:10px 0 0 0;'>Deine Ellbogen sind leicht angewinkelt, fangen Stöße perfekt ab und entspannen die Schultermuskulatur.</p>
                 </div>
             """, unsafe_allow_html=True)
